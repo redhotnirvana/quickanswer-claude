@@ -1,0 +1,15 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>QuickAnswer demo quiz</title>
+<style>body{font:16px system-ui;max-width:640px;margin:40px auto;padding:0 16px}.q{border:1px solid #ddd;border-radius:8px;padding:16px;margin:24px 0}</style></head><body>
+<p><b>Demo practice quiz — AI assistance allowed.</b> Press ⌃⌥, drag a rectangle around a question.</p>
+<div class="q"><p>1. What does market segmentation do?</p>
+<p>A. Sets product prices<br>B. Divides consumers into groups with similar needs<br>C. Manages distribution channels<br>D. Measures brand awareness</p></div>
+<div class="q"><p>2. In two or three sentences, explain why companies use customer personas.</p></div>
+<script>
+// Dev harness only: demo.html?stub fakes the extension (fixed answer). Plain demo.html relies on the real extension.
+if (location.search === '?stub') {
+  window.chrome = {storage:{local:{get:async()=>({enabled:true})}}, runtime:{sendMessage:async m=>{
+    window.__msgs=(window.__msgs||[]).concat(m);
+    return m.type==='CAPTURE'?{image:'stub'}:new Promise(r=>setTimeout(()=>r({answer:'[STUB] B. Divides consumers into groups with similar needs'}),400));}}};
+  document.head.append(Object.assign(document.createElement('script'),{src:'../content.js'}));
+}
+</script></body></html>

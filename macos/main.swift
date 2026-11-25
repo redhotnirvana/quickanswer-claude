@@ -53,15 +53,16 @@ enum Limits {
 }
 
 struct ContextDoc: Identifiable {
-    let url: URL, text: String, pages: Int, bytes: Int
+    /// For a PDF, `text` holds the pages without pictures ("[page N]" headers); `photoPages` (0-based) are sent as PDF.
+    let url: URL, text: String, pages: Int, bytes: Int, photoPages: [Int]
     var enabled: Bool
     var id: URL { url }
     var name: String { url.lastPathComponent }
     var isPDF: Bool { url.pathExtension.lowercased() == "pdf" }
-    /// PDFs are always sent whole (slides: the information is in the images, not the text).
-    var sendsPDF: Bool { isPDF }
-    /// Rough estimate: ~4 characters per token; a PDF also costs ~1,600 tokens per page image.
-    var tokens: Int { text.count / 4 + (sendsPDF ? pages * 1600 : 0) }
+    /// Only pages with a picture go as PDF (page image + text, ~1,600 tokens); the others go as plain text.
+    var sendsPDF: Bool { !photoPages.isEmpty }
+    /// Rough estimate: ~4 characters per token, plus ~1,600 tokens (image + its text) per picture page.
+    var tokens: Int { text.count / 4 + photoPages.count * 1600 }
 }
 
 @MainActor final class DocStore: ObservableObject {
@@ -85,10 +86,15 @@ struct ContextDoc: Identifiable {
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
             .map { url in
                 let pdf = url.pathExtension.lowercased() == "pdf" ? PDFDocument(url: url) : nil
-                let text = pdf.map { $0.string ?? "" }
-                    ?? (try? String(contentsOf: url, encoding: .utf8)) ?? (try? String(contentsOf: url, encoding: .isoLatin1)) ?? ""
+                let photos = pdf == nil ? [] : photoPages(url)
+                let text = pdf.map { pdf in
+                    (0..<pdf.pageCount).filter { !photos.contains($0) }.compactMap { i -> String? in
+                        let t = pdf.page(at: i)?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        return t.isEmpty ? nil : "[page \(i + 1)]\n\(t)"
+                    }.joined(separator: "\n\n")
+                } ?? (try? String(contentsOf: url, encoding: .utf8)) ?? (try? String(contentsOf: url, encoding: .isoLatin1)) ?? ""
                 let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                return ContextDoc(url: url, text: text, pages: pdf?.pageCount ?? 0, bytes: size,
+                return ContextDoc(url: url, text: text, pages: pdf?.pageCount ?? 0, bytes: size, photoPages: photos,
                                   enabled: !off.contains(url.lastPathComponent))
             }
     }
@@ -122,7 +128,7 @@ struct ContextDoc: Identifiable {
     /// Why the active set can't be sent, or nil when it fits the API limits.
     var limitError: String? {
         let pdfs = active.filter(\.sendsPDF)
-        if pdfs.map(\.pages).reduce(0, +) > Limits.maxPDFPages { return "Trop de pages de PDF (max \(Limits.maxPDFPages))." }
+        if pdfs.map(\.photoPages.count).reduce(0, +) > Limits.maxPDFPages { return "Trop de pages de PDF (max \(Limits.maxPDFPages))." }
         if pdfs.map(\.bytes).reduce(0, +) > Limits.maxPDFBytes { return "PDF trop lourds (max 24 Mo au total)." }
         if activeTokens > Limits.maxTokens { return "Documents trop volumineux (max ≈ 900 000 tokens)." }
         return nil
@@ -131,7 +137,7 @@ struct ContextDoc: Identifiable {
     /// Content blocks for the start of the first user turn, the last one carrying a 1-hour cache breakpoint:
     /// a study session with pauses keeps re-reading them at ~0.1x price. Nil when no document is active.
     func blocks() -> [[String: Any]]? {
-        let textDocs = active.filter { !$0.sendsPDF && !$0.text.isEmpty }
+        let textDocs = active.filter { !$0.text.isEmpty } // .txt/.md, and the picture-free pages of each PDF
         let pdfs = active.filter(\.sendsPDF)
         guard !textDocs.isEmpty || !pdfs.isEmpty else { return nil }
         var out: [[String: Any]] = [["type": "text", "text":
@@ -141,13 +147,70 @@ struct ContextDoc: Identifiable {
                 .joined(separator: "\n") + "\n</documents>"])
         }
         for d in pdfs {
-            if base64[d.url] == nil { base64[d.url] = (try? Data(contentsOf: d.url))?.base64EncodedString() }
+            if base64[d.url] == nil, let src = PDFDocument(url: d.url) { // a PDF of the picture pages only
+                let sub = PDFDocument()
+                for i in d.photoPages { if let p = src.page(at: i)?.copy() as? PDFPage { sub.insert(p, at: sub.pageCount) } }
+                base64[d.url] = sub.dataRepresentation()?.base64EncodedString()
+            }
             guard let data = base64[d.url] else { continue }
-            out.append(["type": "document", "title": d.name, "source": ["type": "base64", "media_type": "application/pdf", "data": data]])
+            let pages = d.photoPages.map { String($0 + 1) }.joined(separator: ", ")
+            out.append(["type": "document", "title": "\(d.name) — pages \(pages) (with pictures)",
+                        "source": ["type": "base64", "media_type": "application/pdf", "data": data]])
         }
         out[out.count - 1]["cache_control"] = ["type": "ephemeral", "ttl": "1h"]
         return out
     }
+}
+
+/// 0-based pages of a PDF that need their image: a real picture (photo, screenshot, scan), almost no readable
+/// text (tables or figures drawn as shapes), or dense drawing (charts). Small images (logos, icons) and images
+/// repeated on many pages (slide template backgrounds) don't count.
+/// shortcut: a light vector chart (< 150 strokes) goes as text, labels only; raise its weight if answers miss one.
+func photoPages(_ url: URL) -> [Int] {
+    guard let doc = CGPDFDocument(url as CFURL), doc.numberOfPages > 0, let kit = PDFDocument(url: url) else { return [] }
+    final class Count { var n = 0 }
+    let strokes = CGPDFOperatorTableCreate()!
+    for op in ["re", "l", "c", "v", "y"] { // rectangles, lines, curves
+        CGPDFOperatorTableSetCallback(strokes, op) { _, info in Unmanaged<Count>.fromOpaque(info!).takeUnretainedValue().n += 1 }
+    }
+    var drawn: Set<Int> = []
+    var perPage: [[String]] = []
+    for i in 1...doc.numberOfPages {
+        var sigs: [String] = []
+        func scan(_ res: CGPDFDictionaryRef?, _ depth: Int) {
+            var xobjects: CGPDFDictionaryRef?
+            guard let res, depth < 4, CGPDFDictionaryGetDictionary(res, "XObject", &xobjects), let xobjects else { return }
+            CGPDFDictionaryApplyBlock(xobjects, { _, obj, _ in
+                var stream: CGPDFStreamRef?, sub: UnsafePointer<CChar>?
+                guard CGPDFObjectGetValue(obj, .stream, &stream), let stream, let d = CGPDFStreamGetDictionary(stream),
+                      CGPDFDictionaryGetName(d, "Subtype", &sub), let sub else { return true }
+                if strcmp(sub, "Image") == 0 {
+                    var w = 0, h = 0, len = 0
+                    CGPDFDictionaryGetInteger(d, "Width", &w); CGPDFDictionaryGetInteger(d, "Height", &h)
+                    CGPDFDictionaryGetInteger(d, "Length", &len)
+                    if min(w, h) >= 120 && w * h >= 40_000 { sigs.append("\(w)x\(h)x\(len)") }
+                } else if strcmp(sub, "Form") == 0 { // grouped shapes can hold images too
+                    var inner: CGPDFDictionaryRef?
+                    if CGPDFDictionaryGetDictionary(d, "Resources", &inner) { scan(inner, depth + 1) }
+                }
+                return true
+            }, nil)
+        }
+        var res: CGPDFDictionaryRef?
+        if let page = doc.page(at: i)?.dictionary, CGPDFDictionaryGetDictionary(page, "Resources", &res) { scan(res, 0) }
+        perPage.append(sigs)
+        let count = Count()
+        if let page = doc.page(at: i) {
+            let content = CGPDFContentStreamCreateWithPage(page)
+            CGPDFScannerScan(CGPDFScannerCreate(content, strokes, Unmanaged.passUnretained(count).toOpaque()))
+        }
+        let text = kit.page(at: i - 1)?.string?.trimmingCharacters(in: .whitespacesAndNewlines).count ?? 0
+        if text < 40 || count.n >= 150 { drawn.insert(i - 1) }
+    }
+    var seen: [String: Int] = [:]
+    for sigs in perPage { for s in Set(sigs) { seen[s, default: 0] += 1 } }
+    let decoration = Set(seen.filter { $0.value >= 3 && Double($0.value) >= 0.3 * Double(perPage.count) }.keys)
+    return perPage.indices.filter { i in drawn.contains(i) || perPage[i].contains { !decoration.contains($0) } }
 }
 
 // MARK: - Spending (computed from each response's usage, Haiku 5.5 list prices)
@@ -330,6 +393,7 @@ struct GeneralTab: View {
     @AppStorage("enabled") var enabled = true
     @AppStorage("answerLength") var length = AnswerLength.short.rawValue
     @AppStorage("bubbleTheme") var theme = BubbleTheme.light.rawValue
+    @AppStorage("bubbleFontSize") var fontSize = 14.0
     @AppStorage("shortcutLabel") var shortcutLabel = "⌃⌥"
     @AppStorage("budgetEUR") var budget = 10.0
     @AppStorage(Budget.monthKey) var spentUSD = 0.0 // updated after every answer
@@ -347,6 +411,10 @@ struct GeneralTab: View {
                 ShortcutRecorder()
                 Picker("Thème de la bulle", selection: $theme) {
                     ForEach(BubbleTheme.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
+                }
+                .pickerStyle(.menu)
+                Picker("Taille du texte", selection: $fontSize) {
+                    Text("Petite").tag(12.0); Text("Normale").tag(14.0); Text("Grande").tag(16.0); Text("Très grande").tag(18.0)
                 }
                 .pickerStyle(.menu)
             } footer: { Text("Appuie sur \(shortcutLabel), puis glisse un rectangle autour d'une question. Pour changer de raccourci, clique dessus puis appuie sur une combinaison : au moins deux modificateurs (⌃⌥) ou modificateur + touche (⌘⇧A). Échap pour annuler.") }
@@ -414,7 +482,7 @@ struct DocumentsTab: View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Documents de contexte").font(.title3.weight(.semibold))
-                Text("Envoyés à Claude avec chaque question. Les PDF (slides exportées) partent entiers, images comprises.")
+                Text("Envoyés à Claude avec chaque question. Dans les PDF, seules les pages avec une photo, un tableau ou un graphique partent en image ; les autres partent en texte, bien moins cher.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             List(selection: $selection) {
@@ -469,7 +537,7 @@ struct DocumentsTab: View {
 
     func caption(_ d: ContextDoc) -> String {
         if d.text.isEmpty && !d.isPDF { return "Aucun texte lisible" }
-        return "≈ \(d.tokens.formatted()) tokens\(d.isPDF ? " · \(d.pages) p. avec images" : "")"
+        return "≈ \(d.tokens.formatted()) tokens\(d.isPDF ? " · \(d.photoPages.count)/\(d.pages) p. en image" : "")"
     }
 
     var footer: (text: String, icon: String, color: Color) {
@@ -522,6 +590,13 @@ class FloatingPanel: NSPanel {
 }
 
 class FirstMouseButton: NSButton { override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true } }
+
+/// Bubble title: dragging it moves the bubble. performDrag moves the window without activating the app.
+final class DragLabel: NSTextField {
+    var onDrag: () -> Void = {}
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with e: NSEvent) { onDrag(); window?.performDrag(with: e) }
+}
 
 /// 7 pt white dot with a faint shadow underneath (no outline), inside a 28 pt clear panel: easy to click, shadow not clipped.
 final class DotView: NSView {
@@ -597,7 +672,9 @@ final class Bubble {
     let card = NSView()
     /// Glass theme only: true when the screen behind the bubble is light, so the text turns dark.
     var lightBehind = false
-    let title = NSTextField(labelWithString: "QA")
+    let title = DragLabel(labelWithString: "QA")
+    /// Set once the user drags the bubble: later answers keep its spot. A new selection resets it.
+    var moved = false
     let close = FirstMouseButton(title: "×", target: nil, action: nil)
     let minimize = FirstMouseButton(title: "–", target: nil, action: nil)
     /// Minimized bubble: a tiny white dot where the bubble's top-right corner was; a click reopens the answer.
@@ -619,6 +696,7 @@ final class Bubble {
         close.frame = NSRect(x: 310 - 14 - 22, y: 0, width: 22, height: 24)
         close.setAccessibilityLabel("Fermer")
         close.target = self; close.action = #selector(hide)
+        title.onDrag = { [weak self] in self?.moved = true }
         minimize.isBordered = false
         minimize.frame = NSRect(x: 310 - 14 - 22 - 24, y: 0, width: 22, height: 24)
         minimize.setAccessibilityLabel("Réduire")
@@ -697,14 +775,15 @@ final class Bubble {
     }
 
     func show(_ message: String, near rect: NSRect, on screen: NSScreen) {
-        anchor = rect; self.screen = screen; applyTheme(); set(message)
+        anchor = rect; self.screen = screen; moved = false; applyTheme(); set(message)
     }
 
     func set(_ message: String) {
         guard let screen else { return }
         let w: CGFloat = 310, pad: CGFloat = 14, inner = w - 2 * pad
-        let para = NSMutableParagraphStyle(); para.minimumLineHeight = 21; para.maximumLineHeight = 21
-        var attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: textColor, .paragraphStyle: para]
+        let size = UserDefaults.standard.object(forKey: "bubbleFontSize") as? Double ?? 14 // Settings → Taille du texte
+        let para = NSMutableParagraphStyle(); para.minimumLineHeight = round(size * 1.5); para.maximumLineHeight = round(size * 1.5)
+        var attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: size), .foregroundColor: textColor, .paragraphStyle: para]
         if let halo { attrs[.shadow] = halo }
         text.textStorage?.setAttributedString(NSAttributedString(string: message, attributes: attrs))
         text.frame = NSRect(x: 0, y: 0, width: inner, height: 10)
@@ -719,7 +798,8 @@ final class Bubble {
         minimize.frame.origin.y = h - pad - 22
         field.frame = NSRect(x: pad, y: pad, width: inner, height: fieldH)
         scroll.frame = NSRect(x: pad, y: pad + fieldH + 10, width: inner, height: bodyH)
-        panel.setFrame(Bubble.frame(at: Bubble.corner(of: anchor), on: screen, height: h), display: true)
+        let top = moved && panel.isVisible ? NSPoint(x: panel.frame.minX, y: panel.frame.maxY) : Bubble.corner(of: anchor)
+        panel.setFrame(Bubble.frame(at: top, on: screen, height: h), display: true)
         panel.invalidateShadow()
         dot.orderOut(nil)
         panel.orderFrontRegardless()

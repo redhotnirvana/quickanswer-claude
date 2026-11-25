@@ -34,8 +34,11 @@ RÉGLAGES (QA -> Réglages…, ou ⌘, quand le menu est ouvert)
 - Documents : documents de contexte envoyés à Claude avec chaque question.
   + ou glisser-déposer pour ajouter (PDF, TXT, Markdown), − ou Suppr pour retirer (va à la Corbeille),
   interrupteur pour activer/désactiver un document sans le supprimer.
-  Les PDF (slides exportées depuis PowerPoint/Keynote) partent entiers, images comprises
-  (≈ 1 600 tokens par page). Les .pptx ne sont pas acceptés : exporte-les en PDF.
+  Dans les PDF (slides exportées depuis PowerPoint/Keynote), seules les pages qui ont besoin de leur image
+  partent en image (≈ 1 600 tokens par page) : photo, capture, scan, tableau ou figure sans texte lisible,
+  graphique dense. Les autres partent en texte seul. Logos et fonds de modèle répétés sont ignorés.
+  Sur un cours de 5 PDF (236 pages) : ≈ 195 000 tokens au lieu de ≈ 396 000.
+  Les .pptx ne sont pas acceptés : exporte-les en PDF.
   Blocage au-delà des limites de l'API (600 pages de PDF, 24 Mo, ≈ 900k tokens).
 - Mémoire de la conversation : les questions de la dernière heure (au plus 10, sélections et questions
   tapées, avec leurs images) sont renvoyées avec la suivante, pour que "le tableau", "la question
@@ -55,6 +58,7 @@ Champ « Demander une précision… » sous la réponse : tape une question sur 
 Entrée pour envoyer. La bulle ne prend le clavier que quand tu cliques dans ce champ ; le navigateur reste
 l'app active.
 Bouton « – » à côté de la croix : réduit la bulle en un petit rond blanc ; un clic sur le rond la rouvre.
+Glisse le titre « QA » pour déplacer la bulle. Taille du texte : Réglages → Général.
 
 RECOMPILER (après modification de main.swift)
   ./build.sh

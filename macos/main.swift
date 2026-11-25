@@ -19,7 +19,7 @@ Never restate or quote the question in the answer; start directly with the answe
 - Several correct options allowed ("select all"): list each on its own line in the same format.
 - Open question: answer directly in the question's language, no introduction, at the length requested with the question.
 - If the image is unreadable, cut off, or the question is ambiguous, reply with a short note (in the question's language) saying so instead of guessing.
-- The previous question and your answer may come first. Use them only if the new question refers to or builds on them (e.g. "the previous question", "this model", "same case"); otherwise answer the new question on its own.
+- Earlier questions from the last hour and your answers may come first. Use them only if the new question refers to or builds on them (e.g. "the previous question", "this model", "same case"); otherwise answer the new question on its own.
 - A typed follow-up (text only, no image) is about the conversation so far, e.g. a request to explain or detail your previous answer: answer it in its language, at the requested length.
 """
 
@@ -523,6 +523,19 @@ class FloatingPanel: NSPanel {
 
 class FirstMouseButton: NSButton { override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true } }
 
+/// 7 pt white dot with a faint shadow underneath (no outline), inside a 28 pt clear panel: easy to click, shadow not clipped.
+final class DotView: NSView {
+    var onClick: () -> Void = {}
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with e: NSEvent) { onClick() }
+    override func draw(_ dirty: NSRect) {
+        let s = NSShadow(); s.shadowColor = NSColor(white: 0, alpha: 0.12); s.shadowBlurRadius = 2; s.shadowOffset = NSSize(width: 0, height: -1.5)
+        s.set()
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: bounds.insetBy(dx: 10.5, dy: 10.5)).fill()
+    }
+}
+
 /// The bubble's panel: like the others it never activates the app, and it only becomes key (takes the
 /// keyboard) while the user is typing in its follow-up field. The browser stays the active app throughout.
 final class BubblePanel: FloatingPanel {
@@ -586,6 +599,9 @@ final class Bubble {
     var lightBehind = false
     let title = NSTextField(labelWithString: "Claude · QuickAnswer")
     let close = FirstMouseButton(title: "×", target: nil, action: nil)
+    let minimize = FirstMouseButton(title: "–", target: nil, action: nil)
+    /// Minimized bubble: a tiny white dot where the bubble's top-right corner was; a click reopens the answer.
+    let dot = FloatingPanel(frame: NSRect(x: 0, y: 0, width: 28, height: 28), level: .statusBar)
     let text = NSTextView()
     let scroll = NSScrollView()
     var anchor = NSRect.zero, screen: NSScreen?
@@ -598,11 +614,18 @@ final class Bubble {
         card.layer?.masksToBounds = true
         panel.contentView = card
         title.font = .boldSystemFont(ofSize: 14)
-        title.frame = NSRect(x: 14, y: 0, width: 240, height: 21)
+        title.frame = NSRect(x: 14, y: 0, width: 220, height: 21)
         close.isBordered = false
         close.frame = NSRect(x: 310 - 14 - 22, y: 0, width: 22, height: 24)
         close.setAccessibilityLabel("Fermer")
         close.target = self; close.action = #selector(hide)
+        minimize.isBordered = false
+        minimize.frame = NSRect(x: 310 - 14 - 22 - 24, y: 0, width: 22, height: 24)
+        minimize.setAccessibilityLabel("Réduire")
+        minimize.target = self; minimize.action = #selector(shrink)
+        let circle = DotView(frame: dot.frame)
+        circle.onClick = { [weak self] in self?.restore() }
+        dot.contentView = circle
         text.isEditable = false; text.isSelectable = true; text.drawsBackground = false
         text.textContainerInset = .zero; text.textContainer?.lineFragmentPadding = 0
         text.textContainer?.widthTracksTextView = true
@@ -617,7 +640,7 @@ final class Bubble {
             guard let self else { return }
             panel.allowKey = true; panel.makeKey(); panel.makeFirstResponder(field)
         }
-        card.addSubview(title); card.addSubview(close); card.addSubview(scroll); card.addSubview(field)
+        card.addSubview(title); card.addSubview(close); card.addSubview(minimize); card.addSubview(scroll); card.addSubview(field)
     }
 
     @objc func send() {
@@ -670,6 +693,7 @@ final class Bubble {
         if let halo { titleAttrs[.shadow] = halo; closeAttrs[.shadow] = halo }
         title.attributedStringValue = NSAttributedString(string: "Claude · QuickAnswer", attributes: titleAttrs)
         close.attributedTitle = NSAttributedString(string: "×", attributes: closeAttrs)
+        minimize.attributedTitle = NSAttributedString(string: "–", attributes: closeAttrs)
     }
 
     func show(_ message: String, near rect: NSRect, on screen: NSScreen) {
@@ -692,10 +716,12 @@ final class Bubble {
         card.frame = NSRect(x: 0, y: 0, width: w, height: h)
         title.frame.origin.y = h - pad - 21
         close.frame.origin.y = h - pad - 22
+        minimize.frame.origin.y = h - pad - 22
         field.frame = NSRect(x: pad, y: pad, width: inner, height: fieldH)
         scroll.frame = NSRect(x: pad, y: pad + fieldH + 10, width: inner, height: bodyH)
         panel.setFrame(Bubble.frame(at: Bubble.corner(of: anchor), on: screen, height: h), display: true)
         panel.invalidateShadow()
+        dot.orderOut(nil)
         panel.orderFrontRegardless()
     }
 
@@ -709,7 +735,17 @@ final class Bubble {
     /// Top-left of the bubble: just past the selection's bottom-right corner.
     static func corner(of r: NSRect) -> NSPoint { NSPoint(x: r.maxX + 8, y: r.minY - 8) }
 
-    @objc func hide() { panel.allowKey = false; field.stringValue = ""; panel.orderOut(nil) }
+    @objc func hide() { panel.allowKey = false; field.stringValue = ""; panel.orderOut(nil); dot.orderOut(nil) }
+
+    @objc func shrink() {
+        releaseKeyboard()
+        let f = panel.frame
+        dot.setFrameOrigin(NSPoint(x: f.maxX - 28, y: f.maxY - 28))
+        panel.orderOut(nil)
+        dot.orderFrontRegardless()
+    }
+
+    func restore() { dot.orderOut(nil); panel.orderFrontRegardless() }
 }
 
 // MARK: - Capture + Claude
@@ -861,7 +897,10 @@ func ask(_ jpeg: Data?, question: String? = nil, docs: [[String: Any]]?, slow: B
 @MainActor final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let bubble = Bubble()
     lazy var settings = makeSettingsWindow()
-    var history: [Turn] = [] // current bubble's conversation; a new selection keeps only its last turn as context
+    var history: [Turn] = [] // every question (selection or typed) of the last hour, sent with the next one
+    /// Conversation sent as context: the last hour (same as the documents cache), at most 10 questions,
+    /// so a table shown a few questions ago is still known. ≈ 1–1.5k tokens per image, read from cache.
+    var recentHistory: [Turn] { Array(history.filter { Date().timeIntervalSince($0.at) < 3600 }.suffix(10)) }
     var overlays: [FloatingPanel] = []
     var status: NSStatusItem!
     var request = 0
@@ -978,8 +1017,8 @@ func ask(_ jpeg: Data?, question: String? = nil, docs: [[String: Any]]?, slow: B
                 let store = DocStore.shared
                 if let limit = store.limitError { throw Fail(limit + " Ajuste-les dans Réglages → Documents.") }
                 let (text, _, sent) = try await ask(nil, question: question, docs: store.blocks(),
-                                                    slow: store.active.contains(where: \.sendsPDF), previous: Array(history.suffix(6)))
-                if !text.isEmpty { history.append(Turn(image: nil, text: sent, answer: text, at: Date())) }
+                                                    slow: store.active.contains(where: \.sendsPDF), previous: recentHistory)
+                if !text.isEmpty { history = recentHistory + [Turn(image: nil, text: sent, answer: text, at: Date())] }
                 guard id == request, bubble.panel.isVisible else { return }
                 bubble.set(text.isEmpty ? "Aucune réponse." : text)
             } catch {
@@ -1006,9 +1045,8 @@ func ask(_ jpeg: Data?, question: String? = nil, docs: [[String: Any]]?, slow: B
                     throw Fail(String(format: "Budget mensuel atteint (%.2f € sur %.0f €). Modifiable dans Réglages.", Budget.spentEUR, Budget.limitEUR))
                 }
                 if let limit = store.limitError { throw Fail(limit + " Ajuste-les dans Réglages → Documents.") }
-                let recent = history.last.flatMap { Date().timeIntervalSince($0.at) < 15 * 60 ? [$0] : nil } ?? []
-                let (text, image, sent) = try await ask(jpeg, docs: store.blocks(), slow: store.active.contains(where: \.sendsPDF), previous: recent)
-                if !text.isEmpty { history = [Turn(image: image, text: sent, answer: text, at: Date())] }
+                let (text, image, sent) = try await ask(jpeg, docs: store.blocks(), slow: store.active.contains(where: \.sendsPDF), previous: recentHistory)
+                if !text.isEmpty { history = recentHistory + [Turn(image: image, text: sent, answer: text, at: Date())] }
                 guard id == request, bubble.panel.isVisible else { return }
                 bubble.set(text.isEmpty ? "Aucune réponse." : text)
             } catch {

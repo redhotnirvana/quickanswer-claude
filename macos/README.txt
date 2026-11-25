@@ -37,8 +37,9 @@ RÉGLAGES (QA -> Réglages…, ou ⌘, quand le menu est ouvert)
   Les PDF (slides exportées depuis PowerPoint/Keynote) partent entiers, images comprises
   (≈ 1 600 tokens par page). Les .pptx ne sont pas acceptés : exporte-les en PDF.
   Blocage au-delà des limites de l'API (600 pages de PDF, 24 Mo, ≈ 900k tokens).
-- Question précédente : gardée 15 min et renvoyée avec la suivante (en cache aussi), pour
-  que "ce modèle", "la question précédente"… soient compris. Claude l'ignore si sans rapport.
+- Mémoire de la conversation : les questions de la dernière heure (au plus 10, sélections et questions
+  tapées, avec leurs images) sont renvoyées avec la suivante, pour que "le tableau", "la question
+  précédente"… soient compris. Claude les ignore si sans rapport.
 - Consommation : une ligne par question dans ~/Library/Application Support/QuickAnswer/usage.log
   (cache_read = tokens relus à tarif réduit).
 

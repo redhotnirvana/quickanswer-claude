@@ -546,9 +546,9 @@ final class SelectionView: NSView {
         NSColor(white: 0, alpha: 0.01).setFill(); bounds.fill()
         guard let r = rect else { return }
         let frame = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
-        let shadow = NSShadow(); shadow.shadowColor = NSColor(white: 0, alpha: 0.18); shadow.shadowBlurRadius = 3; shadow.shadowOffset = .zero
+        let shadow = NSShadow(); shadow.shadowColor = NSColor(white: 0, alpha: 0.10); shadow.shadowBlurRadius = 3; shadow.shadowOffset = .zero
         NSGraphicsContext.saveGraphicsState(); shadow.set()
-        NSColor(white: 0.78, alpha: 0.9).setStroke(); frame.lineWidth = 1; frame.stroke()
+        NSColor(white: 0.78, alpha: 0.5).setStroke(); frame.lineWidth = 1; frame.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }
 }

@@ -12,7 +12,7 @@ Deux versions :
 Télécharge `QuickAnswer-1.1.pkg` dans les [Releases](../../releases), ou compile :
 
 ```bash
-cd macos && ./build.sh
+cd macos && ./package.sh   # ou ./build.sh pour l'app seule
 ```
 
 Au premier lancement : saisis ta clé API Anthropic (stockée dans le trousseau macOS, jamais dans le code), puis autorise QuickAnswer dans Accessibilité et Enregistrement de l'écran (Réglages → Général → Autorisations). Détails : [macos/README.txt](macos/README.txt).

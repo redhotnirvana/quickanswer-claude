@@ -58,6 +58,9 @@ Bouton « – » à côté de la croix : réduit la bulle en un petit rond blanc
 
 RECOMPILER (après modification de main.swift)
   ./build.sh
+NOUVELLE VERSION
+  Change le numéro dans VERSION (ex. 1.2), puis ./package.sh : recompile l'app avec ce numéro et crée
+  QuickAnswer-<version>.pkg avec le même numéro (vérifie aussi : aucune clé, signature valide).
 La signature "JARVIS Local Code Signing" garde les permissions entre deux compilations.
 Après une recompilation, macOS peut redemander l'accès au trousseau : "Toujours autoriser".
 

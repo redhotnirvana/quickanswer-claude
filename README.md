@@ -4,7 +4,7 @@ Encadre une question à l'écran, Claude (Haiku 5.5, vision) répond dans une pe
 
 Deux versions :
 
-- **App macOS** (`macos/`) — app de barre des menus en un seul fichier Swift. Raccourci configurable (⌃⌥ par défaut), capture de la zone via ScreenCaptureKit, bulle flottante qui ne prend pas le focus et évite de recouvrir du texte. Réglages : thème de la bulle, longueur des réponses, documents de contexte (PDF/TXT/Markdown, mis en cache), plafond de dépense mensuel en €, état des autorisations macOS.
+- **App macOS** (`macos/`) — app de barre des menus en un seul fichier Swift. Raccourci configurable (⌃⌥ par défaut), capture de la zone via ScreenCaptureKit, bulle flottante au coin bas droit de la sélection, qui ne prend pas le focus. Réglages : thème de la bulle, longueur des réponses, documents de contexte (PDF/TXT/Markdown, mis en cache), plafond de dépense mensuel en €, état des autorisations macOS.
 - **Extension Chrome** (racine) — même principe, dans le navigateur (Manifest V3).
 
 ## Installation (macOS 14+, Apple Silicon)

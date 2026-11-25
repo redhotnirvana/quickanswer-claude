@@ -572,7 +572,6 @@ final class Bubble {
     let text = NSTextView()
     let scroll = NSScrollView()
     var anchor = NSRect.zero, screen: NSScreen?
-    var spot: NSPoint? // top-left picked by the app in an empty area; nil = default rule
     var theme = BubbleTheme.light
     static let darkFill = NSColor(srgbRed: 0x1e/255, green: 0x1e/255, blue: 0x1e/255, alpha: 1) // user's reference swatch, opaque
 
@@ -651,7 +650,7 @@ final class Bubble {
         title.frame.origin.y = h - pad - 21
         close.frame.origin.y = h - pad - 22
         scroll.frame = NSRect(x: pad, y: pad, width: inner, height: bodyH)
-        panel.setFrame(Bubble.frame(at: spot ?? Bubble.candidates(near: anchor, on: screen)[0].origin, on: screen, height: h), display: true)
+        panel.setFrame(Bubble.frame(at: Bubble.corner(of: anchor), on: screen, height: h), display: true)
         panel.invalidateShadow()
         panel.orderFrontRegardless()
     }
@@ -663,27 +662,8 @@ final class Bubble {
         return NSRect(x: x, y: max(vf.minY + 8, t - h), width: 310, height: h)
     }
 
-    /// Spots around the question, as frames of an estimated bubble (`origin` = top-left: x, top edge).
-    /// The first one is the original rule: right of the rectangle, just below its bottom.
-    static func candidates(near r: NSRect, on screen: NSScreen, height h: CGFloat = 160) -> [NSRect] {
-        let w: CGFloat = 310
-        var tops: [NSPoint] = [
-            NSPoint(x: r.maxX + 10, y: r.minY - 8),      // right, below (original)
-            NSPoint(x: r.maxX + 10, y: r.maxY),          // right, top-aligned
-            NSPoint(x: r.minX, y: r.minY - 8),           // below
-            NSPoint(x: r.minX, y: r.maxY + 8 + h),       // above
-            NSPoint(x: r.minX - 10 - w, y: r.maxY),      // left, top-aligned
-            NSPoint(x: r.minX - 10 - w, y: r.minY - 8),  // left, below
-        ]
-        for dy in stride(from: CGFloat(40), through: 400, by: 40) { // then further down, nearest first
-            tops.append(NSPoint(x: r.minX, y: r.minY - 8 - dy))
-            tops.append(NSPoint(x: r.maxX + 10, y: r.minY - 8 - dy))
-        }
-        return tops.map { t in
-            let f = frame(at: t, on: screen, height: h)
-            return NSRect(x: f.minX, y: f.maxY, width: w, height: h) // origin = top-left for the caller
-        }
-    }
+    /// Top-left of the bubble: just past the selection's bottom-right corner.
+    static func corner(of r: NSRect) -> NSPoint { NSPoint(x: r.maxX + 8, y: r.minY - 8) }
 
     @objc func hide() { panel.orderOut(nil) }
 }
@@ -729,19 +709,15 @@ struct ScreenMap {
         lum = stride(from: 0, to: px.count, by: 4).map { (0.299 * Double(px[$0]) + 0.587 * Double(px[$0 + 1]) + 0.114 * Double(px[$0 + 2])) / 255 }
     }
 
-    /// For an area given by its top-left corner and size (points): how "busy" it is (share of pixels on a
-    /// sharp edge, high where there's text) and its average brightness.
-    func look(at r: NSRect) -> (busy: Double, brightness: Double) {
+    /// Average brightness of an area (AppKit rect, global points).
+    func brightness(of r: NSRect) -> Double {
         let sx = Double(w) / frame.width, sy = Double(h) / frame.height
-        let x0 = max(0, Int((r.minX - frame.minX) * sx)), x1 = min(w - 1, Int((r.minX + r.width - frame.minX) * sx))
-        let y0 = max(0, Int((frame.maxY - r.minY) * sy)), y1 = min(h - 1, Int((frame.maxY - r.minY + r.height) * sy))
-        guard x1 > x0, y1 > y0 else { return (1, 0) }
-        var edges = 0, sum = 0.0, n = 0
-        for y in y0..<y1 { for x in x0..<x1 {
-            let v = lum[y * w + x]; sum += v; n += 1
-            if abs(v - lum[y * w + x + 1]) > 0.15 || abs(v - lum[(y + 1) * w + x]) > 0.15 { edges += 1 }
-        } }
-        return (Double(edges) / Double(n), sum / Double(n))
+        let x0 = max(0, Int((r.minX - frame.minX) * sx)), x1 = min(w, Int((r.maxX - frame.minX) * sx))
+        let y0 = max(0, Int((frame.maxY - r.maxY) * sy)), y1 = min(h, Int((frame.maxY - r.minY) * sy))
+        guard x1 > x0, y1 > y0 else { return 0 }
+        var sum = 0.0
+        for y in y0..<y1 { for x in x0..<x1 { sum += lum[y * w + x] } }
+        return sum / Double((x1 - x0) * (y1 - y0))
     }
 }
 
@@ -931,21 +907,11 @@ func ask(_ jpeg: Data, docs: [[String: Any]]?, slow: Bool, previous: Turn?) asyn
         }
     }
 
-    /// Puts the bubble in the emptiest spot around the question (never on it), and for the glass theme
-    /// picks dark text over a light background, white over a dark one. One low-res screen capture, no API call.
+    /// Glass theme: dark text over a light background, white over a dark one. One low-res screen capture, no API call.
     func placeBubble(near rect: NSRect, on screen: NSScreen) async {
-        let spots = Bubble.candidates(near: rect, on: screen)
-        bubble.spot = spots[0].origin
         guard let map = await ScreenMap(screen) else { return }
-        let question = rect.insetBy(dx: 4, dy: 4)
-        let scored = spots.compactMap { s -> (NSRect, Double)? in
-            let area = NSRect(x: s.minX, y: s.minY - s.height, width: s.width, height: s.height) // back to AppKit rect
-            // Check a 10 pt margin around the bubble too, so it doesn't sit flush against a line of text.
-            return area.intersects(question) ? nil : (s, map.look(at: NSRect(x: s.minX - 10, y: s.minY + 10, width: s.width + 20, height: s.height + 20)).busy)
-        }
-        // Spots are ordered nearest first: take the first empty one, or the least busy if none is empty.
-        if let best = scored.first(where: { $0.1 < 0.003 }) ?? scored.min(by: { $0.1 < $1.1 }) { bubble.spot = best.0.origin }
-        if let spot = bubble.spot { bubble.lightBehind = map.look(at: NSRect(origin: spot, size: spots[0].size)).brightness > 0.55 }
+        let f = Bubble.frame(at: Bubble.corner(of: rect), on: screen, height: 160)
+        bubble.lightBehind = map.brightness(of: f) > 0.55
     }
 
     func cancelOverlay() { overlays.forEach { $0.orderOut(nil) }; overlays.removeAll() }

@@ -43,9 +43,9 @@ RÉGLAGES (QA -> Réglages…, ou ⌘, quand le menu est ouvert)
   (cache_read = tokens relus à tarif réduit).
 
 PLACEMENT DE LA BULLE
-Avant d'afficher la bulle, l'app prend une capture basse résolution de l'écran (sans appel API) et teste
-plusieurs emplacements autour de la question (droite, dessous, dessus, gauche, puis plus bas jusqu'à ~400 pt).
-Elle prend le plus proche qui ne recouvre ni la question ni du texte ; sinon le moins chargé.
+La bulle apparaît juste à côté du coin bas droit de la sélection (décalée de 8 pt), et reste dans l'écran
+si la sélection est près d'un bord. Thème Verre : l'app prend une capture basse résolution de l'écran
+(sans appel API) pour choisir un texte noir sur fond clair ou blanc sur fond sombre.
 
 UTILISATION
 ⌃⌥ -> glisse un rectangle -> la bulle apparaît à côté. Echap annule / ferme la bulle.

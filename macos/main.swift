@@ -655,11 +655,11 @@ final class Bubble {
         panel.orderFrontRegardless()
     }
 
-    /// Places a bubble whose top-left corner is `top` (x, top edge), kept on screen.
+    /// Places a bubble whose top-left corner is `top` (x, top edge), kept 48 pt inside the visible screen.
     static func frame(at top: NSPoint, on screen: NSScreen, height h: CGFloat) -> NSRect {
-        let vf = screen.visibleFrame
-        let x = max(vf.minX + 8, min(vf.maxX - 318, top.x)), t = min(vf.maxY - 8, top.y)
-        return NSRect(x: x, y: max(vf.minY + 8, t - h), width: 310, height: h)
+        let vf = screen.visibleFrame.insetBy(dx: 48, dy: 48) // keep clear of screen edges and corners
+        let x = max(vf.minX, min(vf.maxX - 310, top.x)), t = min(vf.maxY, top.y)
+        return NSRect(x: x, y: max(vf.minY, t - h), width: 310, height: h)
     }
 
     /// Top-left of the bubble: just past the selection's bottom-right corner.

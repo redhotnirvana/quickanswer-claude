@@ -43,8 +43,8 @@ RÉGLAGES (QA -> Réglages…, ou ⌘, quand le menu est ouvert)
   (cache_read = tokens relus à tarif réduit).
 
 PLACEMENT DE LA BULLE
-La bulle apparaît juste à côté du coin bas droit de la sélection (décalée de 8 pt), et reste dans l'écran
-si la sélection est près d'un bord. Thème Verre : l'app prend une capture basse résolution de l'écran
+La bulle apparaît juste à côté du coin bas droit de la sélection (décalée de 8 pt), et reste à au moins 48 pt des bords
+de l'écran (pas collée aux bords ni dans les coins), même si la sélection est près d'un bord. Thème Verre : l'app prend une capture basse résolution de l'écran
 (sans appel API) pour choisir un texte noir sur fond clair ou blanc sur fond sombre.
 
 UTILISATION

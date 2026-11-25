@@ -3,7 +3,7 @@ QUICKANSWER (app macOS)
 Même fonctionnement que l'extension, mais hors de la page : rien n'est ajouté au HTML,
 et le navigateur reste l'application active (nom en haut à gauche inchangé).
 
-INSTALLATION (QuickAnswer-1.0.pkg)
+INSTALLATION (QuickAnswer-1.1.pkg)
 Double-clic sur le .pkg -> installe QuickAnswer.app dans /Applications. Aucune clé API incluse.
 Si macOS bloque l'ouverture (paquet non notarisé) : clic droit sur le .pkg -> Ouvrir, ou
 Réglages Système -> Confidentialité et sécurité -> "Ouvrir quand même".

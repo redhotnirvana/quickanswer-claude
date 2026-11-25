@@ -9,7 +9,7 @@ Deux versions :
 
 ## Installation (macOS 14+, Apple Silicon)
 
-Télécharge `QuickAnswer-1.0.pkg` dans les [Releases](../../releases), ou compile :
+Télécharge `QuickAnswer-1.1.pkg` dans les [Releases](../../releases), ou compile :
 
 ```bash
 cd macos && ./build.sh

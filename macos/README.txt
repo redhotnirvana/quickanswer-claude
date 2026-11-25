@@ -51,6 +51,10 @@ de l'écran (pas collée aux bords ni dans les coins), même si la sélection es
 UTILISATION
 ⌃⌥ -> glisse un rectangle (fin cadre gris clair, l'écran n'est pas assombri) -> la bulle apparaît à côté. Echap annule / ferme la bulle.
 Le texte de la bulle est sélectionnable (copie avec clic droit -> Copier).
+Champ « Demander une précision… » sous la réponse : tape une question sur la réponse (sans nouvelle capture),
+Entrée pour envoyer. La bulle ne prend le clavier que quand tu cliques dans ce champ ; le navigateur reste
+l'app active.
+Bouton « – » à côté de la croix : réduit la bulle en un petit rond blanc ; un clic sur le rond la rouvre.
 
 RECOMPILER (après modification de main.swift)
   ./build.sh

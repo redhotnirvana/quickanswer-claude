@@ -1,6 +1,6 @@
 # QuickAnswer
 
-Encadre une question à l'écran, Claude (Haiku 5.5, vision) répond dans une petite bulle à côté.
+Encadre une question à l'écran, Claude (Haiku 5.5, vision) répond dans une petite bulle à côté. Tu peux poser une question de suivi dans la bulle, ou la réduire en petit rond.
 
 Deux versions :
 

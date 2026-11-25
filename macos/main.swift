@@ -20,6 +20,7 @@ Never restate or quote the question in the answer; start directly with the answe
 - Open question: answer directly in the question's language, no introduction, at the length requested with the question.
 - If the image is unreadable, cut off, or the question is ambiguous, reply with a short note (in the question's language) saying so instead of guessing.
 - The previous question and your answer may come first. Use them only if the new question refers to or builds on them (e.g. "the previous question", "this model", "same case"); otherwise answer the new question on its own.
+- A typed follow-up (text only, no image) is about the conversation so far, e.g. a request to explain or detail your previous answer: answer it in its language, at the requested length.
 """
 
 // MARK: - API key in the macOS Keychain
@@ -522,6 +523,20 @@ class FloatingPanel: NSPanel {
 
 class FirstMouseButton: NSButton { override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true } }
 
+/// The bubble's panel: like the others it never activates the app, and it only becomes key (takes the
+/// keyboard) while the user is typing in its follow-up field. The browser stays the active app throughout.
+final class BubblePanel: FloatingPanel {
+    var allowKey = false
+    override var canBecomeKey: Bool { allowKey }
+}
+
+/// Follow-up field: a click on it is the only thing that gives the bubble the keyboard.
+final class FollowUpField: NSTextField {
+    var onClick: () -> Void = {}
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with e: NSEvent) { onClick(); super.mouseDown(with: e) }
+}
+
 // MARK: - Selection overlay (one per screen)
 
 final class SelectionView: NSView {
@@ -563,7 +578,9 @@ enum BubbleTheme: Int, CaseIterable {
 }
 
 final class Bubble {
-    let panel = FloatingPanel(frame: .zero, level: .statusBar)
+    let panel = BubblePanel(frame: .zero, level: .statusBar)
+    let field = FollowUpField()
+    var onAsk: (String) -> Void = { _ in }
     let card = NSView()
     /// Glass theme only: true when the screen behind the bubble is light, so the text turns dark.
     var lightBehind = false
@@ -591,7 +608,32 @@ final class Bubble {
         text.textContainer?.widthTracksTextView = true
         scroll.documentView = text; scroll.drawsBackground = false
         scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.borderType = .noBorder
-        card.addSubview(title); card.addSubview(close); card.addSubview(scroll)
+        field.placeholderString = "Demander une précision…"
+        field.bezelStyle = .roundedBezel
+        field.font = .systemFont(ofSize: 13)
+        field.focusRingType = .none
+        field.target = self; field.action = #selector(send)
+        field.onClick = { [weak self] in
+            guard let self else { return }
+            panel.allowKey = true; panel.makeKey(); panel.makeFirstResponder(field)
+        }
+        card.addSubview(title); card.addSubview(close); card.addSubview(scroll); card.addSubview(field)
+    }
+
+    @objc func send() {
+        let q = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        field.stringValue = ""
+        releaseKeyboard()
+        onAsk(q)
+    }
+
+    /// Hands the keyboard back: the panel can't be key any more, and re-ordering it lets macOS give
+    /// key status back to the active app's window (the browser).
+    func releaseKeyboard() {
+        guard panel.isKeyWindow else { panel.allowKey = false; return }
+        panel.allowKey = false
+        panel.orderOut(nil); panel.orderFrontRegardless()
     }
 
     var darkText: Bool { theme == .light || (theme == .glass && lightBehind) }
@@ -645,11 +687,13 @@ final class Bubble {
         text.layoutManager?.ensureLayout(for: text.textContainer!)
         let textH = ceil(text.layoutManager?.usedRect(for: text.textContainer!).height ?? 21)
         text.frame.size.height = textH
-        let bodyH = min(textH, 220), h = pad + 21 + 8 + bodyH + pad
+        let fieldH: CGFloat = 26
+        let bodyH = min(textH, 220), h = pad + 21 + 8 + bodyH + 10 + fieldH + pad
         card.frame = NSRect(x: 0, y: 0, width: w, height: h)
         title.frame.origin.y = h - pad - 21
         close.frame.origin.y = h - pad - 22
-        scroll.frame = NSRect(x: pad, y: pad, width: inner, height: bodyH)
+        field.frame = NSRect(x: pad, y: pad, width: inner, height: fieldH)
+        scroll.frame = NSRect(x: pad, y: pad + fieldH + 10, width: inner, height: bodyH)
         panel.setFrame(Bubble.frame(at: Bubble.corner(of: anchor), on: screen, height: h), display: true)
         panel.invalidateShadow()
         panel.orderFrontRegardless()
@@ -665,7 +709,7 @@ final class Bubble {
     /// Top-left of the bubble: just past the selection's bottom-right corner.
     static func corner(of r: NSRect) -> NSPoint { NSPoint(x: r.maxX + 8, y: r.minY - 8) }
 
-    @objc func hide() { panel.orderOut(nil) }
+    @objc func hide() { panel.allowKey = false; field.stringValue = ""; panel.orderOut(nil) }
 }
 
 // MARK: - Capture + Claude
@@ -740,21 +784,24 @@ enum AnswerLength: Int, CaseIterable {
 
 /// One answered question, kept so a follow-up ("et pour la question précédente ?") can refer to it.
 /// `text` is the exact instruction sent with it, so the replayed turn matches the cache byte for byte.
-struct Turn { let image: String; let text: String; let answer: String; let at: Date }
+struct Turn { let image: String?; let text: String; let answer: String; let at: Date } // image nil = typed follow-up
 
-func ask(_ jpeg: Data, docs: [[String: Any]]?, slow: Bool, previous: Turn?) async throws -> (answer: String, image: String, text: String) {
-    let image = jpeg.base64EncodedString()
+/// `jpeg` = a new screen selection; `question` = a typed follow-up (no image) about `previous`.
+func ask(_ jpeg: Data?, question: String? = nil, docs: [[String: Any]]?, slow: Bool, previous: [Turn]) async throws -> (answer: String, image: String?, text: String) {
+    let image = jpeg?.base64EncodedString()
     let length = AnswerLength.current
     // Length lives in the question turn, not the system prompt, so switching it keeps the documents cache.
-    let instruction = "Answer the question in this image. \(length.instruction)"
-    func userTurn(_ img: String, _ instruction: String, cache: Bool) -> [String: Any] {
+    let instruction = question.map { "Follow-up question typed by the user: \($0)\n\(length.instruction)" }
+        ?? "Answer the question in this image. \(length.instruction)"
+    func userTurn(_ img: String?, _ instruction: String, cache: Bool) -> [String: Any] {
         var text: [String: Any] = ["type": "text", "text": instruction]
         // 5-min breakpoint on the newest question: the next request re-reads it from cache as "previous".
         if cache { text["cache_control"] = ["type": "ephemeral"] }
-        return ["role": "user", "content": [["type": "image", "source": ["type": "base64", "media_type": "image/jpeg", "data": img]], text]]
+        let picture: [[String: Any]] = img.map { [["type": "image", "source": ["type": "base64", "media_type": "image/jpeg", "data": $0]]] } ?? []
+        return ["role": "user", "content": picture + [text]]
     }
     var messages: [[String: Any]] = []
-    if let p = previous {
+    for p in previous {
         messages.append(userTurn(p.image, p.text, cache: false))
         messages.append(["role": "assistant", "content": p.answer])
     }
@@ -814,7 +861,7 @@ func ask(_ jpeg: Data, docs: [[String: Any]]?, slow: Bool, previous: Turn?) asyn
 @MainActor final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let bubble = Bubble()
     lazy var settings = makeSettingsWindow()
-    var lastTurn: Turn? // only the previous question: enough for follow-ups, keeps requests small
+    var history: [Turn] = [] // current bubble's conversation; a new selection keeps only its last turn as context
     var overlays: [FloatingPanel] = []
     var status: NSStatusItem!
     var request = 0
@@ -836,7 +883,10 @@ func ask(_ jpeg: Data, docs: [[String: Any]]?, slow: Bool, previous: Turn?) asyn
         if KeyStore.get() == nil { askKey() }
         if CommandLine.arguments.contains("--select") { startOverlay() } // test hook
         if CommandLine.arguments.contains("--settings") { openSettings() } // test hook
-        if CommandLine.arguments.contains("--bubble-demo"), let s = NSScreen.main { // test hook: sample bubble, no API call
+        bubble.onAsk = { [weak self] in self?.followUp($0) }
+        if CommandLine.arguments.contains("--bubble-demo"), let s = NSScreen.main { // test hook: sample bubble, no API call until a follow-up is typed
+            history = [Turn(image: nil, text: "Question: What does market segmentation do? A. Sets prices B. Divides consumers into groups with similar needs C. Builds factories",
+                            answer: "B. Market segmentation divides consumers into groups with similar needs.", at: Date())]
             Task { await placeBubble(near: NSRect(x: s.frame.midX - 300, y: s.frame.midY, width: 300, height: 80), on: s)
             bubble.show("B. Market segmentation divides consumers into groups with similar needs.",
                         near: NSRect(x: s.frame.midX - 300, y: s.frame.midY, width: 300, height: 80), on: s) }
@@ -914,6 +964,31 @@ func ask(_ jpeg: Data, docs: [[String: Any]]?, slow: Bool, previous: Turn?) asyn
         bubble.lightBehind = map.brightness(of: f) > 0.55
     }
 
+    /// Typed in the bubble's field: a text-only question about the answers shown in this bubble.
+    func followUp(_ question: String) {
+        request += 1
+        let id = request
+        bubble.set("Analyse en cours…")
+        Task { @MainActor in
+            do {
+                guard !history.isEmpty else { throw Fail("Pas encore de réponse à préciser : encadre d'abord une question.") }
+                if Budget.spentEUR >= Budget.limitEUR {
+                    throw Fail(String(format: "Budget mensuel atteint (%.2f € sur %.0f €). Modifiable dans Réglages.", Budget.spentEUR, Budget.limitEUR))
+                }
+                let store = DocStore.shared
+                if let limit = store.limitError { throw Fail(limit + " Ajuste-les dans Réglages → Documents.") }
+                let (text, _, sent) = try await ask(nil, question: question, docs: store.blocks(),
+                                                    slow: store.active.contains(where: \.sendsPDF), previous: Array(history.suffix(6)))
+                if !text.isEmpty { history.append(Turn(image: nil, text: sent, answer: text, at: Date())) }
+                guard id == request, bubble.panel.isVisible else { return }
+                bubble.set(text.isEmpty ? "Aucune réponse." : text)
+            } catch {
+                guard id == request else { return }
+                bubble.set("Erreur : \(error.localizedDescription)")
+            }
+        }
+    }
+
     func cancelOverlay() { overlays.forEach { $0.orderOut(nil) }; overlays.removeAll() }
 
     func answer(_ rect: NSRect, on screen: NSScreen) {
@@ -931,9 +1006,9 @@ func ask(_ jpeg: Data, docs: [[String: Any]]?, slow: Bool, previous: Turn?) asyn
                     throw Fail(String(format: "Budget mensuel atteint (%.2f € sur %.0f €). Modifiable dans Réglages.", Budget.spentEUR, Budget.limitEUR))
                 }
                 if let limit = store.limitError { throw Fail(limit + " Ajuste-les dans Réglages → Documents.") }
-                let recent = lastTurn.flatMap { Date().timeIntervalSince($0.at) < 15 * 60 ? $0 : nil }
+                let recent = history.last.flatMap { Date().timeIntervalSince($0.at) < 15 * 60 ? [$0] : nil } ?? []
                 let (text, image, sent) = try await ask(jpeg, docs: store.blocks(), slow: store.active.contains(where: \.sendsPDF), previous: recent)
-                if !text.isEmpty { lastTurn = Turn(image: image, text: sent, answer: text, at: Date()) }
+                if !text.isEmpty { history = [Turn(image: image, text: sent, answer: text, at: Date())] }
                 guard id == request, bubble.panel.isVisible else { return }
                 bubble.set(text.isEmpty ? "Aucune réponse." : text)
             } catch {

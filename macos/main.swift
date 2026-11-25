@@ -597,7 +597,7 @@ final class Bubble {
     let card = NSView()
     /// Glass theme only: true when the screen behind the bubble is light, so the text turns dark.
     var lightBehind = false
-    let title = NSTextField(labelWithString: "Claude · QuickAnswer")
+    let title = NSTextField(labelWithString: "QA")
     let close = FirstMouseButton(title: "×", target: nil, action: nil)
     let minimize = FirstMouseButton(title: "–", target: nil, action: nil)
     /// Minimized bubble: a tiny white dot where the bubble's top-right corner was; a click reopens the answer.
@@ -691,7 +691,7 @@ final class Bubble {
         var titleAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 14), .foregroundColor: textColor]
         var closeAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 20), .foregroundColor: mutedColor]
         if let halo { titleAttrs[.shadow] = halo; closeAttrs[.shadow] = halo }
-        title.attributedStringValue = NSAttributedString(string: "Claude · QuickAnswer", attributes: titleAttrs)
+        title.attributedStringValue = NSAttributedString(string: "QA", attributes: titleAttrs)
         close.attributedTitle = NSAttributedString(string: "×", attributes: closeAttrs)
         minimize.attributedTitle = NSAttributedString(string: "–", attributes: closeAttrs)
     }

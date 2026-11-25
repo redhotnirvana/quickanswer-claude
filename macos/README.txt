@@ -48,7 +48,7 @@ de l'écran (pas collée aux bords ni dans les coins), même si la sélection es
 (sans appel API) pour choisir un texte noir sur fond clair ou blanc sur fond sombre.
 
 UTILISATION
-⌃⌥ -> glisse un rectangle -> la bulle apparaît à côté. Echap annule / ferme la bulle.
+⌃⌥ -> glisse un rectangle (fin cadre gris clair, l'écran n'est pas assombri) -> la bulle apparaît à côté. Echap annule / ferme la bulle.
 Le texte de la bulle est sélectionnable (copie avec clic droit -> Copier).
 
 RECOMPILER (après modification de main.swift)

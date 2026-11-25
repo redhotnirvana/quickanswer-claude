@@ -542,14 +542,14 @@ final class SelectionView: NSView {
     override func rightMouseDragged(with e: NSEvent) { mouseDragged(with: e) }
     override func rightMouseUp(with e: NSEvent) { mouseUp(with: e) }
     override func draw(_ dirty: NSRect) {
-        NSColor(white: 0, alpha: 0.08).setFill(); bounds.fill()
+        // Invisible to the eye, but a fully transparent window would let the clicks through to the page.
+        NSColor(white: 0, alpha: 0.01).setFill(); bounds.fill()
         guard let r = rect else { return }
-        let outside = NSBezierPath(rect: bounds); outside.append(NSBezierPath(rect: r)); outside.windingRule = .evenOdd
-        NSColor(white: 0, alpha: 0.18).setFill(); outside.fill()
-        let frame = NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4)
-        let orange = NSColor(srgbRed: 0xd9/255, green: 0x67/255, blue: 0x30/255, alpha: 1)
-        orange.withAlphaComponent(0.06).setFill(); frame.fill()
-        orange.setStroke(); frame.lineWidth = 1.5; frame.stroke()
+        let frame = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
+        let shadow = NSShadow(); shadow.shadowColor = NSColor(white: 0, alpha: 0.18); shadow.shadowBlurRadius = 3; shadow.shadowOffset = .zero
+        NSGraphicsContext.saveGraphicsState(); shadow.set()
+        NSColor(white: 0.78, alpha: 0.9).setStroke(); frame.lineWidth = 1; frame.stroke()
+        NSGraphicsContext.restoreGraphicsState()
     }
 }
 
